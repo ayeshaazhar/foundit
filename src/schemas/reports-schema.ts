@@ -29,6 +29,12 @@ export const reportsSchema: CollectionSchema = {
     },
 
     {
+      name: 'imageUrl',
+      storage: 'text',
+      interpretation: 'plain',
+      required: false,
+    },
+    {
       name: 'category',
       storage: 'text',
       interpretation: {
@@ -79,6 +85,13 @@ export const reportsSchema: CollectionSchema = {
       },
       default: 'open',
       required: true,
+    },
+
+    {
+      name: 'matchedWithId',
+      storage: 'text',
+      interpretation: 'plain',
+      required: false,
     },
   ],
 

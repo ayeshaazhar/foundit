@@ -1,14 +1,22 @@
-import { useState } from 'react'
-import { integration, useAuthProfileReady, useMutations, useQuery, } from 'deepspace'
+import { useRef, useState } from 'react'
+import {
+  integration,
+  useAuthProfileReady,
+  useMutations,
+  useQuery,
+  useR2Files,
+} from 'deepspace'
 interface ReportData {
   type: 'lost' | 'found'
   title: string
   description: string
+  imageUrl?: string
   category: string
   location: string
   eventDate: number
   createdBy: string
   status: 'open' | 'matched'
+  matchedWithId?: string
 }
 interface MatchAnalysis {
   score: number
@@ -17,7 +25,7 @@ interface MatchAnalysis {
 }
 export default function HomePage() {
   const { isSignedIn, user } = useAuthProfileReady({ requireUser: true })
-
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const { records: reports, status } = useQuery<ReportData>('reports')
 
   const { createConfirmed, putConfirmed, removeConfirmed } = useMutations<ReportData>('reports')
@@ -41,6 +49,8 @@ export default function HomePage() {
 
   const [analyzingMatch, setAnalyzingMatch] = useState<string | null>(null)
 
+  const { upload, isUploading } = useR2Files({ scope: 'app' })
+  const [imageFile, setImageFile] = useState<File | null>(null)
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
 
@@ -52,10 +62,28 @@ export default function HomePage() {
         new Date(eventDate).getTime() / 1000,
       )
 
+
+      let imageUrl = ''
+
+      if (imageFile) {
+        const uploadResult = await upload(
+          imageFile,
+          imageFile.name,
+        )
+
+        if (!uploadResult.success || !uploadResult.url) {
+          throw new Error(
+            uploadResult.error ?? 'Image upload failed.',
+          )
+        }
+
+        imageUrl = uploadResult.url
+      }
       await createConfirmed({
         type,
         title,
         description,
+        imageUrl,
         category,
         location,
         eventDate: dateAsSeconds,
@@ -69,6 +97,10 @@ export default function HomePage() {
       setDescription('')
       setLocation('')
       setEventDate('')
+      setImageFile(null)
+      if (fileInputRef.current) {
+  fileInputRef.current.value = ''
+}
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -85,7 +117,28 @@ export default function HomePage() {
     setEditDescription(report.data.description)
     setEditLocation(report.data.location)
   }
+  const handleConfirmMatch = async (
+    lostReportId: string,
+    foundReportId: string,
+  ) => {
+    setMessage('')
+    setError('')
 
+    try {
+      await putConfirmed(lostReportId, {
+        status: 'matched',
+        matchedWithId: foundReportId,
+      })
+
+      setMessage('Match confirmed successfully.')
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : String(err),
+      )
+    }
+  }
   const handleSave = async (recordId: string) => {
     setMessage('')
     setError('')
@@ -157,7 +210,7 @@ export default function HomePage() {
             candidateLocation.includes(word),
           )
 
-      return locationLooksRelated
+      return true
     })
   }
 
@@ -374,11 +427,30 @@ Only estimate whether the reports could describe the same item.
               />
             </div>
 
+            <div>
+              <label className="mb-1 block text-sm font-medium">
+                Photo (optional)
+              </label>
+
+              <input
+  ref={fileInputRef}
+  type="file"
+  accept="image/*"
+  onChange={(e) => {
+    const file = e.target.files?.[0] ?? null
+    setImageFile(file)
+  }}
+  className="w-full rounded border border-border bg-background px-3 py-2"
+/>
+            </div>
+
+
             <button
               type="submit"
-              className="w-full rounded bg-primary px-4 py-2 font-medium text-primary-foreground"
+              disabled={isUploading}
+              className="w-full rounded bg-primary px-4 py-2 font-medium text-primary-foreground disabled:opacity-50"
             >
-              Create Report
+              {isUploading ? 'Uploading...' : 'Create Report'}
             </button>
           </form>
 
@@ -462,16 +534,28 @@ Only estimate whether the reports could describe the same item.
                   </div>
                 ) : (
                   <>
+
+
+                    {report.data.imageUrl && (
+                      <img
+                        src={report.data.imageUrl}
+                        alt={report.data.title}
+                        className="mb-3 h-40 w-full rounded object-contain"
+                      />
+                    )}
                     <p className="mt-2 text-sm">
                       {report.data.description}
                     </p>
-
                     <div className="mt-3 space-y-1 text-xs text-muted-foreground">
                       <p>Category: {report.data.category}</p>
                       <p>Location: {report.data.location}</p>
-                      <p>Status: {report.data.status}</p>
+                      {report.data.status === 'matched' && (
+                        <p className="font-medium">
+                          ✓ Match confirmed
+                        </p>
+                      )}
                     </div>
-                    {report.data.type === 'lost' && getCandidateMatches(report.recordId).length > 0 && (
+                    {report.data.type === 'lost' && report.data.status === 'open' && getCandidateMatches(report.recordId).length > 0 && (
                       <div className="mt-4 rounded border border-border bg-muted/30 p-3">
                         <p className="mb-2 text-sm font-medium">
                           Possible matches
@@ -538,6 +622,20 @@ Only estimate whether the reports could describe the same item.
                                         </ul>
                                       </div>
                                     )}
+                                    {report.data.createdBy === user?.id &&
+                                      report.data.status !== 'matched' && (
+                                        <button
+                                          onClick={() =>
+                                            handleConfirmMatch(
+                                              report.recordId,
+                                              candidate.recordId,
+                                            )
+                                          }
+                                          className="mt-3 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
+                                        >
+                                          Confirm Match
+                                        </button>
+                                      )}
                                   </div>
                                 )}
                               </div>
